@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v1.3</title>
+  <title>ウイコレ手持ち管理ツール v2.0</title>
   <style>
     body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
     .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-    .version-info { font-size: 0.85em; color: #007bff; font-weight: bold; margin-bottom: 10px; }
+    .version-info { font-size: 0.85em; color: #d9534f; font-weight: bold; margin-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; }
     th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
     th { background-color: #007bff; color: white; }
@@ -16,7 +16,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v1.3 (モデル名修正版)</div>
+  <div class="version-info">バージョン: v2.0 (API接続・JSON解析処理 完全改修版)</div>
 
   <div class="card">
     <label>Gemini API Key: </label>
@@ -24,7 +24,7 @@
     <button onclick="saveApiKey()">キーを保存</button>
     <span id="keyStatus" style="color: green; font-size: 0.9em; margin-left: 10px;"></span>
     <br><br>
-    <p style="font-size: 0.85em; color: #666;">※1選手につき複数枚（3枚まで）のスクショを同時に選択可能です</p>
+    <p style="font-size: 0.85em; color: #666;">※1選手につき複数枚（最大3枚）のスクショを同時に選択できます</p>
     <input type="file" id="imageInput" accept="image/*" multiple>
     <button onclick="analyzeImages()">スクショを解析して登録</button>
     <p id="status"></p>
@@ -87,7 +87,7 @@
     }
 
     async function analyzeImages() {
-      const apiKey = document.getElementById('apiKey').value;
+      const apiKey = document.getElementById('apiKey').value.trim();
       const fileInput = document.getElementById('imageInput');
       const status = document.getElementById('status');
 
@@ -97,58 +97,72 @@
       status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
 
       try {
-        const imageParts = [];
+        const parts = [];
         let previewDataUrl = '';
 
+        // プロンプトを最初に追加
+        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下の項目を統合して1つのJSONオブジェクトのみを出力してください。余計な解説文やコードブロックは含めないでください。
+
+JSONフォーマット:
+{
+  "name": "選手名",
+  "card_type": "カード種別",
+  "grade": "グレード数値",
+  "type": "タイプ",
+  "position": "ポジション",
+  "is_kira": "あり/なし",
+  "showtime": "あり/なし",
+  "offence": "OF数値",
+  "defence": "DF数値",
+  "technique": "TC数値",
+  "power": "PO数値",
+  "speed": "SP数値",
+  "stamina": "ST数値",
+  "main_skill": "メインスキル名",
+  "select_skill": "セレクトスキル名"
+}`;
+
+        parts.push({ text: promptText });
+
+        // 各画像データをBase64変換してPartsに追加
         for (let i = 0; i < fileInput.files.length; i++) {
           const file = fileInput.files[i];
           const dataUrl = await fileToBase64(file);
           if (i === 0) previewDataUrl = dataUrl;
-          
-          imageParts.push({
+
+          parts.push({
             inline_data: {
-              mime_type: file.type,
+              mime_type: file.type || 'image/jpeg',
               data: dataUrl.split(',')[1]
             }
           });
         }
 
-        const prompt = `提供されたウイコレの画像群から情報を抽出し、以下のフォーマットのJSONのみを出力してください。
-        {
-          "name": "選手名",
-          "card_type": "カード種別（レギュラー, ナショナル, レジェンドなど）",
-          "grade": 123,
-          "type": "タイプ（テクニック, パワーなど）",
-          "position": "ポジション",
-          "is_kira": "あり/なし",
-          "showtime": "あり/なし",
-          "offence": 1000,
-          "defence": 1000,
-          "technique": 1000,
-          "power": 1000,
-          "speed": 1000,
-          "stamina": 1000,
-          "main_skill": "メインスキル名",
-          "select_skill": "選択中のセレクトスキル名（なければ『なし』）"
-        }`;
-
-        const requestBody = {
-          contents: [{ parts: [{ text: prompt }, ...imageParts] }]
-        };
-
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        // Gemini 1.5 Flash エンドポイントの呼び出し
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify({ contents: [{ parts: parts }] })
         });
 
         const data = await response.json();
-        if (data.error) throw new Error(data.error.message);
 
-        const textResponse = data.candidates[0].content.parts[0].text;
-        const cleanJson = textResponse.replace(/```json|```/g, '').trim();
-        const card = JSON.parse(cleanJson);
+        if (data.error) {
+          throw new Error(`APIエラー (${data.error.code}): ${data.error.message}`);
+        }
 
+        const rawText = data.candidates[0].content.parts[0].text;
+        
+        // JSON部分だけを安全に抽出（正規表現処理）
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('AIからの応答をJSONとして解析できませんでした。');
+        }
+
+        const card = JSON.parse(jsonMatch[0]);
+
+        // テーブルへの追加描画
         const table = document.getElementById('cardTable');
         const row = table.insertRow();
         row.innerHTML = `
