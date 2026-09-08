@@ -2,21 +2,30 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v3.1</title>
+  <title>ウイコレ手持ち管理ツール v4.0</title>
   <style>
     body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
     .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-    .version-info { font-size: 0.85em; color: #dc3545; font-weight: bold; margin-bottom: 10px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; }
-    th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+    .version-info { font-size: 0.85em; color: #007bff; font-weight: bold; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8em; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: center; vertical-align: middle; white-space: pre-wrap; }
     th { background-color: #007bff; color: white; }
-    .card-thumb { width: 60px; height: auto; border-radius: 4px; }
+    
+    /* カード画像部分のみを中心にトリミングして表示する設定 */
+    .card-thumb { 
+      width: 70px; 
+      height: 90px; 
+      object-fit: cover; 
+      object-position: top center; 
+      border-radius: 6px; 
+      border: 1px solid #ccc;
+    }
   </style>
 </head>
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v3.1 (gemini-3.6-flash 直接呼出版)</div>
+  <div class="version-info">バージョン: v4.0 (スキル/センス/ボーナスセンス7枠/適性ポジション対応版)</div>
 
   <div class="card">
     <label>Gemini API Key: </label>
@@ -39,7 +48,7 @@
         <th>カード種類</th>
         <th>グレード</th>
         <th>タイプ</th>
-        <th>ポジ</th>
+        <th>ポジション適性</th>
         <th>キラ</th>
         <th>SHOWTIME</th>
         <th>OF</th>
@@ -48,8 +57,10 @@
         <th>PO</th>
         <th>SP</th>
         <th>ST</th>
-        <th>メインスキル</th>
-        <th>セレクトスキル</th>
+        <th>メインスキル(最大3)</th>
+        <th>セレクトスキル(最大3)</th>
+        <th>センス(最大3)</th>
+        <th>ボーナスセンス(最大7枠)</th>
       </tr>
     </thead>
     <tbody id="cardTable">
@@ -94,13 +105,20 @@
       if (!apiKey) return alert('API Keyを入力してください');
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
-      status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
+      status.innerText = `${fileInput.files.length}枚の画像を詳細解析中...`;
 
       try {
         const parts = [];
         let previewDataUrl = '';
 
-        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下のJSONフォーマットのみを出力してください。余計な文章は一切含めないでください。
+        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下の項目を正確に抽出して指定のJSONフォーマットのみを出力してください。余計な説明文は含めないでください。
+
+【注意・抽出仕様】
+1. main_skills: メインスキルを最大3つまで配列で抽出。
+2. select_skills: セレクトスキル（選択中のものや所持しているもの）を最大3つまで配列で抽出。
+3. senses: 所持・装着しているセンスを最大3つまで配列で抽出。
+4. bonus_senses: ボーナスセンス（Lv1で2枠、Lv2で2枠、Lv3で3枠の最大7枠）の解放・適用状況を配列（文字列のリスト）で抽出。
+5. position: 本適性（濃い色）と薄適性（薄い色）を区別して、「本適性: OMF, CMF / 薄適性: DMF」のような形式で記載。
 
 JSONフォーマット:
 {
@@ -108,7 +126,7 @@ JSONフォーマット:
   "card_type": "カード種別",
   "grade": "グレード数値",
   "type": "タイプ",
-  "position": "ポジション",
+  "position": "本適性: OMF, CMF / 薄適性: DMF",
   "is_kira": "あり/なし",
   "showtime": "あり/なし",
   "offence": "OF数値",
@@ -117,8 +135,10 @@ JSONフォーマット:
   "power": "PO数値",
   "speed": "SP数値",
   "stamina": "ST数値",
-  "main_skill": "メインスキル名",
-  "select_skill": "セレクトスキル名"
+  "main_skills": ["スキル1", "スキル2", "スキル3"],
+  "select_skills": ["スキル1", "スキル2", "スキル3"],
+  "senses": ["センス1", "センス2", "センス3"],
+  "bonus_senses": ["Lv1: xx", "Lv1: xx", "Lv2: xx", "Lv2: xx", "Lv3: xx", "Lv3: xx", "Lv3: xx"]
 }`;
 
         parts.push({ text: promptText });
@@ -136,7 +156,6 @@ JSONフォーマット:
           });
         }
 
-        // 指定どおり gemini-3.6-flash を正しくリクエスト
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
         const response = await fetch(apiUrl, {
           method: 'POST',
@@ -158,6 +177,12 @@ JSONフォーマット:
 
         const card = JSON.parse(jsonMatch[0]);
 
+        // 配列データを改行テキストに変換
+        const mainSkillsStr = Array.isArray(card.main_skills) ? card.main_skills.join('\n') : (card.main_skills || '-');
+        const selectSkillsStr = Array.isArray(card.select_skills) ? card.select_skills.join('\n') : (card.select_skills || '-');
+        const sensesStr = Array.isArray(card.senses) ? card.senses.join('\n') : (card.senses || '-');
+        const bonusSensesStr = Array.isArray(card.bonus_senses) ? card.bonus_senses.join('\n') : (card.bonus_senses || '-');
+
         const table = document.getElementById('cardTable');
         const row = table.insertRow();
         row.innerHTML = `
@@ -166,7 +191,7 @@ JSONフォーマット:
           <td>${card.card_type || '-'}</td>
           <td>${card.grade || '-'}</td>
           <td>${card.type || '-'}</td>
-          <td>${card.position || '-'}</td>
+          <td style="text-align:left;">${card.position || '-'}</td>
           <td>${card.is_kira || '-'}</td>
           <td>${card.showtime || '-'}</td>
           <td>${card.offence || '-'}</td>
@@ -175,8 +200,10 @@ JSONフォーマット:
           <td>${card.power || '-'}</td>
           <td>${card.speed || '-'}</td>
           <td>${card.stamina || '-'}</td>
-          <td>${card.main_skill || '-'}</td>
-          <td>${card.select_skill || '-'}</td>
+          <td style="text-align:left;">${mainSkillsStr}</td>
+          <td style="text-align:left;">${selectSkillsStr}</td>
+          <td style="text-align:left;">${sensesStr}</td>
+          <td style="text-align:left;">${bonusSensesStr}</td>
         `;
 
         status.innerText = '解析完了！';
