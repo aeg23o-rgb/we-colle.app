@@ -2,79 +2,147 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v4.0</title>
+  <title>ウイコレ手持ち管理ツール v6.0</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
-    .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-    .version-info { font-size: 0.85em; color: #007bff; font-weight: bold; margin-bottom: 10px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8em; }
-    th, td { border: 1px solid #ddd; padding: 6px; text-align: center; vertical-align: middle; white-space: pre-wrap; }
-    th { background-color: #007bff; color: white; }
+    body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
+    .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .version-info { font-size: 0.85em; color: #28a745; font-weight: bold; margin-bottom: 8px; }
     
-    /* カード画像部分のみを中心にトリミングして表示する設定 */
-    .card-thumb { 
-      width: 70px; 
-      height: 90px; 
-      object-fit: cover; 
-      object-position: top center; 
-      border-radius: 6px; 
-      border: 1px solid #ccc;
-    }
+    .btn { padding: 5px 10px; cursor: pointer; border: none; border-radius: 4px; background: #007bff; color: white; font-size: 0.9em; }
+    .btn:hover { background: #0056b3; }
+    .btn-danger { background: #dc3545; }
+    .btn-danger:hover { background: #bd2130; }
+    .btn-success { background: #28a745; }
+    .btn-success:hover { background: #218838; }
+    .btn-warning { background: #ffc107; color: #212529; }
+
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    input[type="text"], select { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; }
+
+    .table-wrapper { overflow-x: auto; width: 100%; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.75em; white-space: nowrap; }
+    th, td { border: 1px solid #ddd; padding: 5px 6px; text-align: center; vertical-align: middle; }
+    th { background-color: #007bff; color: white; position: sticky; top: 0; }
+    th.sub-header { background-color: #0056b3; font-size: 0.9em; }
+    
+    .img-container { width: 60px; height: 80px; overflow: hidden; margin: 0 auto; border-radius: 4px; border: 1px solid #ccc; }
+    .card-thumb { width: 140%; height: 140%; object-fit: cover; object-position: 50% 15%; margin-left: -20%; margin-top: -10%; }
+    
+    td[contenteditable="true"] { background-color: #fffde7; outline: 1px dashed #ffc107; }
   </style>
 </head>
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v4.0 (スキル/センス/ボーナスセンス7枠/適性ポジション対応版)</div>
+  <div class="version-info">バージョン: v6.0 (保存/復元・編集/削除・絞り込み・CSV/JSON出力対応)</div>
 
+  <!-- APIキー & 画像解析カード -->
   <div class="card">
     <label>Gemini API Key: </label>
     <input type="password" id="apiKey" placeholder="AI Studioで取得したキーを入力">
-    <button onclick="saveApiKey()">キーを保存</button>
+    <button class="btn" onclick="saveApiKey()">キーを保存</button>
     <span id="keyStatus" style="color: green; font-size: 0.9em; margin-left: 10px;"></span>
     <br><br>
-    <p style="font-size: 0.85em; color: #666;">※1選手につき複数枚（最大3枚）のスクショを同時に選択できます</p>
     <input type="file" id="imageInput" accept="image/*" multiple>
-    <button onclick="analyzeImages()">スクショを解析して登録</button>
-    <p id="status"></p>
+    <button class="btn btn-success" onclick="analyzeImages()">スクショを解析して追加</button>
+    <span id="status" style="margin-left: 10px; font-weight: bold;"></span>
   </div>
 
-  <h2>所持カード一覧</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>画像</th>
-        <th>選手名</th>
-        <th>カード種類</th>
-        <th>グレード</th>
-        <th>タイプ</th>
-        <th>ポジション適性</th>
-        <th>キラ</th>
-        <th>SHOWTIME</th>
-        <th>OF</th>
-        <th>DF</th>
-        <th>TC</th>
-        <th>PO</th>
-        <th>SP</th>
-        <th>ST</th>
-        <th>メインスキル(最大3)</th>
-        <th>セレクトスキル(最大3)</th>
-        <th>センス(最大3)</th>
-        <th>ボーナスセンス(最大7枠)</th>
-      </tr>
-    </thead>
-    <tbody id="cardTable">
-      <!-- 解析結果追加位置 -->
-    </tbody>
-  </table>
+  <!-- 絞り込み & データ管理コントロール -->
+  <div class="card">
+    <div class="controls">
+      <strong>🔎 絞り込み/検索:</strong>
+      <input type="text" id="searchName" placeholder="選手名で検索" oninput="renderTable()">
+      
+      <select id="filterType" onchange="renderTable()">
+        <option value="">すべてのタイプ</option>
+        <option value="オフェンス">オフェンス</option>
+        <option value="ディフェンス">ディフェンス</option>
+        <option value="テクニック">テクニック</option>
+        <option value="パワー">パワー</option>
+        <option value="スピード">スピード</option>
+        <option value="スタミナ">スタミナ</option>
+      </select>
+
+      <label><input type="checkbox" id="filterSelectOnly" onchange="renderTable()"> セレクトスキル持ちのみ</label>
+
+      <strong>⇅ ソート:</strong>
+      <select id="sortBy" onchange="renderTable()">
+        <option value="default">登録順</option>
+        <option value="gradeDesc">グレード順 (高い順)</option>
+        <option value="gradeAsc">グレード順 (低い順)</option>
+      </select>
+    </div>
+
+    <div class="controls" style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+      <strong>💾 データ操作:</strong>
+      <button class="btn btn-warning" onclick="exportCSV()">CSV出力 (Excel用)</button>
+      <button class="btn btn-warning" onclick="exportJSON()">JSONバックアップ</button>
+      <button class="btn" onclick="document.getElementById('importFile').click()">JSONから復元</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+      <button class="btn btn-danger" style="margin-left: auto;" onclick="clearAllCards()">全データ消去</button>
+    </div>
+  </div>
+
+  <!-- カード一覧テーブル -->
+  <h2>所持カード一覧 (<span id="cardCount">0</span>枚)</h2>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">操作</th>
+          <th rowspan="2">画像</th>
+          <th rowspan="2">選手名</th>
+          <th rowspan="2">カード種類</th>
+          <th rowspan="2">グレード</th>
+          <th rowspan="2">タイプ</th>
+          <th rowspan="2">ポジション適性</th>
+          <th rowspan="2">キラ</th>
+          <th rowspan="2">SHOWTIME</th>
+          <th rowspan="2">OF</th>
+          <th rowspan="2">DF</th>
+          <th rowspan="2">TC</th>
+          <th rowspan="2">PO</th>
+          <th rowspan="2">SP</th>
+          <th rowspan="2">ST</th>
+          <th colspan="3">メインスキル</th>
+          <th colspan="3">セレクトスキル</th>
+          <th colspan="3">センス</th>
+          <th colspan="7">ボーナスセンス (最大7枠)</th>
+        </tr>
+        <tr>
+          <th class="sub-header">メイン1</th>
+          <th class="sub-header">メイン2</th>
+          <th class="sub-header">メイン3</th>
+          <th class="sub-header">セレクト1</th>
+          <th class="sub-header">セレクト2</th>
+          <th class="sub-header">セレクト3</th>
+          <th class="sub-header">センス1</th>
+          <th class="sub-header">センス2</th>
+          <th class="sub-header">センス3</th>
+          <th class="sub-header">Lv1-①</th>
+          <th class="sub-header">Lv1-②</th>
+          <th class="sub-header">Lv2-①</th>
+          <th class="sub-header">Lv2-②</th>
+          <th class="sub-header">Lv3-①</th>
+          <th class="sub-header">Lv3-②</th>
+          <th class="sub-header">Lv3-③</th>
+        </tr>
+      </thead>
+      <tbody id="cardTable"></tbody>
+    </table>
+  </div>
 
   <script>
+    let cardList = [];
+
     window.onload = function() {
       const savedKey = localStorage.getItem('gemini_api_key');
       if (savedKey) {
         document.getElementById('apiKey').value = savedKey;
         document.getElementById('keyStatus').innerText = '※保存済み';
       }
+      loadCards();
     };
 
     function saveApiKey() {
@@ -85,6 +153,118 @@
       } else {
         localStorage.removeItem('gemini_api_key');
         document.getElementById('keyStatus').innerText = '';
+      }
+    }
+
+    function saveCards() {
+      localStorage.setItem('wi_cards_data', JSON.stringify(cardList));
+      renderTable();
+    }
+
+    function loadCards() {
+      const data = localStorage.getItem('wi_cards_data');
+      if (data) {
+        try { cardList = JSON.parse(data); } catch (e) { cardList = []; }
+      }
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('cardTable');
+      tbody.innerHTML = '';
+
+      const searchName = document.getElementById('searchName').value.toLowerCase();
+      const filterType = document.getElementById('filterType').value;
+      const filterSelectOnly = document.getElementById('filterSelectOnly').checked;
+      const sortBy = document.getElementById('sortBy').value;
+
+      // フィルタリング
+      let filtered = cardList.filter(card => {
+        const matchesName = !searchName || (card.name && card.name.toLowerCase().includes(searchName));
+        const matchesType = !filterType || card.type === filterType;
+        const hasSelect = !filterSelectOnly || (card.select_skills && card.select_skills.some(s => s && s !== '-'));
+        return matchesName && matchesType && hasSelect;
+      });
+
+      // ソート
+      if (sortBy === 'gradeDesc') {
+        filtered.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
+      } else if (sortBy === 'gradeAsc') {
+        filtered.sort((a, b) => (parseInt(a.grade) || 0) - (parseInt(b.grade) || 0));
+      }
+
+      document.getElementById('cardCount').innerText = filtered.length;
+
+      const getVal = (arr, idx) => (Array.isArray(arr) && arr[idx]) ? arr[idx] : '-';
+
+      filtered.forEach((card) => {
+        const originalIndex = cardList.indexOf(card);
+        const row = tbody.insertRow();
+
+        row.innerHTML = `
+          <td>
+            <button class="btn btn-danger" style="padding:2px 5px; font-size:0.8em;" onclick="deleteCard(${originalIndex})">削除</button>
+          </td>
+          <td><div class="img-container"><img src="${card.image || ''}" class="card-thumb"></div></td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'name', this.innerText)"><b>${card.name || '-'}</b></td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'card_type', this.innerText)">${card.card_type || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'grade', this.innerText)">${card.grade || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'type', this.innerText)">${card.type || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'position', this.innerText)" style="text-align:left;">${card.position || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'is_kira', this.innerText)">${card.is_kira || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'showtime', this.innerText)">${card.showtime || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'offence', this.innerText)">${card.offence || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'defence', this.innerText)">${card.defence || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'technique', this.innerText)">${card.technique || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'power', this.innerText)">${card.power || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'speed', this.innerText)">${card.speed || '-'}</td>
+          <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'stamina', this.innerText)">${card.stamina || '-'}</td>
+          
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 0, this.innerText)">${getVal(card.main_skills, 0)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 1, this.innerText)">${getVal(card.main_skills, 1)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 2, this.innerText)">${getVal(card.main_skills, 2)}</td>
+          
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'select_skills', 0, this.innerText)">${getVal(card.select_skills, 0)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'select_skills', 1, this.innerText)">${getVal(card.select_skills, 1)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'select_skills', 2, this.innerText)">${getVal(card.select_skills, 2)}</td>
+          
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'senses', 0, this.innerText)">${getVal(card.senses, 0)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'senses', 1, this.innerText)">${getVal(card.senses, 1)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'senses', 2, this.innerText)">${getVal(card.senses, 2)}</td>
+          
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 0, this.innerText)">${getVal(card.bonus_senses, 0)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 1, this.innerText)">${getVal(card.bonus_senses, 1)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 2, this.innerText)">${getVal(card.bonus_senses, 2)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 3, this.innerText)">${getVal(card.bonus_senses, 3)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 4, this.innerText)">${getVal(card.bonus_senses, 4)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 5, this.innerText)">${getVal(card.bonus_senses, 5)}</td>
+          <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'bonus_senses', 6, this.innerText)">${getVal(card.bonus_senses, 6)}</td>
+        `;
+      });
+    }
+
+    function updateCardData(index, field, val) {
+      cardList[index][field] = val.trim();
+      localStorage.setItem('wi_cards_data', JSON.stringify(cardList));
+    }
+
+    function updateCardArrData(index, field, arrIdx, val) {
+      if (!Array.isArray(cardList[index][field])) cardList[index][field] = [];
+      cardList[index][field][arrIdx] = val.trim();
+      localStorage.setItem('wi_cards_data', JSON.stringify(cardList));
+    }
+
+    function deleteCard(index) {
+      if (confirm('このカードを削除しますか？')) {
+        cardList.splice(index, 1);
+        saveCards();
+      }
+    }
+
+    function clearAllCards() {
+      if (confirm('登録されている全カードデータを消去しますか？（復元できません）')) {
+        cardList = [];
+        saveCards();
       }
     }
 
@@ -105,20 +285,13 @@
       if (!apiKey) return alert('API Keyを入力してください');
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
-      status.innerText = `${fileInput.files.length}枚の画像を詳細解析中...`;
+      status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
 
       try {
         const parts = [];
         let previewDataUrl = '';
 
-        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下の項目を正確に抽出して指定のJSONフォーマットのみを出力してください。余計な説明文は含めないでください。
-
-【注意・抽出仕様】
-1. main_skills: メインスキルを最大3つまで配列で抽出。
-2. select_skills: セレクトスキル（選択中のものや所持しているもの）を最大3つまで配列で抽出。
-3. senses: 所持・装着しているセンスを最大3つまで配列で抽出。
-4. bonus_senses: ボーナスセンス（Lv1で2枠、Lv2で2枠、Lv3で3枠の最大7枠）の解放・適用状況を配列（文字列のリスト）で抽出。
-5. position: 本適性（濃い色）と薄適性（薄い色）を区別して、「本適性: OMF, CMF / 薄適性: DMF」のような形式で記載。
+        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、指定のJSON形式で出力してください。
 
 JSONフォーマット:
 {
@@ -135,10 +308,10 @@ JSONフォーマット:
   "power": "PO数値",
   "speed": "SP数値",
   "stamina": "ST数値",
-  "main_skills": ["スキル1", "スキル2", "スキル3"],
-  "select_skills": ["スキル1", "スキル2", "スキル3"],
+  "main_skills": ["メイン1", "メイン2", "メイン3"],
+  "select_skills": ["セレクト1", "セレクト2", "セレクト3"],
   "senses": ["センス1", "センス2", "センス3"],
-  "bonus_senses": ["Lv1: xx", "Lv1: xx", "Lv2: xx", "Lv2: xx", "Lv3: xx", "Lv3: xx", "Lv3: xx"]
+  "bonus_senses": ["Lv1-1", "Lv1-2", "Lv2-1", "Lv2-2", "Lv3-1", "Lv3-2", "Lv3-3"]
 }`;
 
         parts.push({ text: promptText });
@@ -176,41 +349,71 @@ JSONフォーマット:
         }
 
         const card = JSON.parse(jsonMatch[0]);
+        card.image = previewDataUrl; // 画像データ保持
 
-        // 配列データを改行テキストに変換
-        const mainSkillsStr = Array.isArray(card.main_skills) ? card.main_skills.join('\n') : (card.main_skills || '-');
-        const selectSkillsStr = Array.isArray(card.select_skills) ? card.select_skills.join('\n') : (card.select_skills || '-');
-        const sensesStr = Array.isArray(card.senses) ? card.senses.join('\n') : (card.senses || '-');
-        const bonusSensesStr = Array.isArray(card.bonus_senses) ? card.bonus_senses.join('\n') : (card.bonus_senses || '-');
+        cardList.push(card);
+        saveCards();
 
-        const table = document.getElementById('cardTable');
-        const row = table.insertRow();
-        row.innerHTML = `
-          <td><img src="${previewDataUrl}" class="card-thumb"></td>
-          <td><b>${card.name || '-'}</b></td>
-          <td>${card.card_type || '-'}</td>
-          <td>${card.grade || '-'}</td>
-          <td>${card.type || '-'}</td>
-          <td style="text-align:left;">${card.position || '-'}</td>
-          <td>${card.is_kira || '-'}</td>
-          <td>${card.showtime || '-'}</td>
-          <td>${card.offence || '-'}</td>
-          <td>${card.defence || '-'}</td>
-          <td>${card.technique || '-'}</td>
-          <td>${card.power || '-'}</td>
-          <td>${card.speed || '-'}</td>
-          <td>${card.stamina || '-'}</td>
-          <td style="text-align:left;">${mainSkillsStr}</td>
-          <td style="text-align:left;">${selectSkillsStr}</td>
-          <td style="text-align:left;">${sensesStr}</td>
-          <td style="text-align:left;">${bonusSensesStr}</td>
-        `;
-
-        status.innerText = '解析完了！';
+        status.innerText = '解析＆追加完了！';
+        fileInput.value = '';
       } catch (e) {
         console.error(e);
         status.innerText = 'エラー詳細: ' + e.message;
       }
+    }
+
+    // CSVエクスポート
+    function exportCSV() {
+      if (cardList.length === 0) return alert('データがありません');
+
+      let csv = '\uFEFF'; // UTF-8 BOM（Excel文字化け防止）
+      csv += '選手名,カード種類,グレード,タイプ,ポジション適性,キラ,SHOWTIME,OF,DF,TC,PO,SP,ST,メイン1,メイン2,メイン3,セレクト1,セレクト2,セレクト3,センス1,センス2,センス3,Lv1-1,Lv1-2,Lv2-1,Lv2-2,Lv3-1,Lv3-2,Lv3-3\n';
+
+      const getV = (arr, i) => (Array.isArray(arr) && arr[i]) ? `"${arr[i]}"` : '""';
+
+      cardList.forEach(c => {
+        csv += `"${c.name||''}","${c.card_type||''}","${c.grade||''}","${c.type||''}","${c.position||''}","${c.is_kira||''}","${c.showtime||''}","${c.offence||''}","${c.defence||''}","${c.technique||''}","${c.power||''}","${c.speed||''}","${c.stamina||''}",`
+            + `${getV(c.main_skills,0)},${getV(c.main_skills,1)},${getV(c.main_skills,2)},`
+            + `${getV(c.select_skills,0)},${getV(c.select_skills,1)},${getV(c.select_skills,2)},`
+            + `${getV(c.senses,0)},${getV(c.senses,1)},${getV(c.senses,2)},`
+            + `${getV(c.bonus_senses,0)},${getV(c.bonus_senses,1)},${getV(c.bonus_senses,2)},${getV(c.bonus_senses,3)},${getV(c.bonus_senses,4)},${getV(c.bonus_senses,5)},${getV(c.bonus_senses,6)}\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `we_collection_cards_${new Date().toISOString().slice(0,10)}.csv`;
+      link.click();
+    }
+
+    // JSONエクスポート
+    function exportJSON() {
+      if (cardList.length === 0) return alert('データがありません');
+      const blob = new Blob([JSON.stringify(cardList, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `we_collection_backup_${new Date().toISOString().slice(0,10)}.json`;
+      link.click();
+    }
+
+    // JSONインポート
+    function importJSON(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const imported = JSON.parse(evt.target.result);
+          if (Array.isArray(imported)) {
+            cardList = imported;
+            saveCards();
+            alert('データを復元しました！');
+          }
+        } catch (err) {
+          alert('JSONファイルの読み込みに失敗しました');
+        }
+      };
+      reader.readAsText(file);
     }
   </script>
 </body>
