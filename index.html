@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v7.0</title>
+  <title>ウイコレ手持ち管理ツール v7.2</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -15,6 +15,11 @@
     .btn-success { background: #28a745; }
     .btn-success:hover { background: #218838; }
     .btn-warning { background: #ffc107; color: #212529; }
+
+    .api-key-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .api-key-item { display: flex; align-items: center; gap: 5px; }
+    .api-key-item label { font-weight: bold; min-width: 45px; }
+    .api-key-item input { width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; }
 
     .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
     input[type="text"], select { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -36,13 +41,19 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v7.0 (複数APIキー自動切り替え・Lv.MAX/キラ化ステータス自動計算対応)</div>
+  <div class="version-info">バージョン: v7.2 (APIキー5枠分割・自動ローテーション対応)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
-    <label>Gemini API Keys (カンマ区切りで複数入力可能): </label><br>
-    <input type="password" id="apiKey" style="width: 60%;" placeholder="Key1, Key2, Key3 のように複数登録可能">
-    <button class="btn" onclick="saveApiKey()">キー群を保存</button>
+    <strong>🔑 Gemini API Key 設定 (最大5つまで登録可能):</strong>
+    <div class="api-key-grid" style="margin-top: 8px;">
+      <div class="api-key-item"><label>API 1:</label><input type="password" id="apiKey1" placeholder="キー 1"></div>
+      <div class="api-key-item"><label>API 2:</label><input type="password" id="apiKey2" placeholder="キー 2"></div>
+      <div class="api-key-item"><label>API 3:</label><input type="password" id="apiKey3" placeholder="キー 3"></div>
+      <div class="api-key-item"><label>API 4:</label><input type="password" id="apiKey4" placeholder="キー 4"></div>
+      <div class="api-key-item"><label>API 5:</label><input type="password" id="apiKey5" placeholder="キー 5"></div>
+    </div>
+    <button class="btn" onclick="saveApiKey()">APIキー群を保存</button>
     <span id="keyStatus" style="color: green; font-size: 0.9em; margin-left: 10px;"></span>
     <br><br>
     <input type="file" id="imageInput" accept="image/*" multiple>
@@ -115,10 +126,8 @@
           <th class="sub-header">PO</th>
           <th class="sub-header">SP</th>
           <th class="sub-header">ST</th>
-          <!-- 予測ステータス -->
           <th class="calc-header">Lv.MAX総合値</th>
           <th class="calc-header">キラ化時総合値(+10%)</th>
-          <!-- スキル詳細 -->
           <th class="sub-header">メイン1</th>
           <th class="sub-header">メイン2</th>
           <th class="sub-header">メイン3</th>
@@ -145,29 +154,45 @@
     let cardList = [];
 
     window.onload = function() {
-      const savedKey = localStorage.getItem('gemini_api_keys');
-      if (savedKey) {
-        document.getElementById('apiKey').value = savedKey;
-        document.getElementById('keyStatus').innerText = '※保存済み';
+      for (let i = 1; i <= 5; i++) {
+        const savedKey = localStorage.getItem(`gemini_api_key_${i}`);
+        if (savedKey) {
+          document.getElementById(`apiKey${i}`).value = savedKey;
+        }
       }
+      checkKeyStatusText();
       loadCards();
     };
 
     function saveApiKey() {
-      const key = document.getElementById('apiKey').value;
-      if (key) {
-        localStorage.setItem('gemini_api_keys', key);
-        document.getElementById('keyStatus').innerText = '※保存しました！';
+      for (let i = 1; i <= 5; i++) {
+        const val = document.getElementById(`apiKey${i}`).value.trim();
+        if (val) {
+          localStorage.setItem(`gemini_api_key_${i}`, val);
+        } else {
+          localStorage.removeItem(`gemini_api_key_${i}`);
+        }
+      }
+      checkKeyStatusText();
+    }
+
+    function checkKeyStatusText() {
+      const keys = getApiKeys();
+      const statusEl = document.getElementById('keyStatus');
+      if (keys.length > 0) {
+        statusEl.innerText = `※${keys.length}個のAPIキーを保存済み`;
       } else {
-        localStorage.removeItem('gemini_api_keys');
-        document.getElementById('keyStatus').innerText = '';
+        statusEl.innerText = '';
       }
     }
 
     function getApiKeys() {
-      const raw = document.getElementById('apiKey').value.trim();
-      if (!raw) return [];
-      return raw.split(',').map(k => k.trim()).filter(k => k.length > 0);
+      const keys = [];
+      for (let i = 1; i <= 5; i++) {
+        const val = document.getElementById(`apiKey${i}`).value.trim();
+        if (val) keys.push(val);
+      }
+      return keys;
     }
 
     function saveCards() {
@@ -183,7 +208,6 @@
       renderTable();
     }
 
-    // Lv.MAX総合値 & キラ化総合値の自動判定・補正計算
     function calcPredictedStats(card) {
       const of = parseInt(card.offence) || 0;
       const df = parseInt(card.defence) || 0;
@@ -195,11 +219,9 @@
       const currentTotal = of + df + tc + po + sp + st;
       const grade = parseInt(card.grade) || 100;
 
-      // 概算Lv.MAX補正係数 (グレード依存)
       const maxMult = 1.35 + (grade / 500); 
       const maxTotal = Math.round(currentTotal * maxMult);
 
-      // キラ化 (+10% 補正)
       const isKira = (card.is_kira && card.is_kira.includes('あり'));
       const kiraTotal = isKira ? maxTotal : Math.round(maxTotal * 1.10);
 
@@ -318,7 +340,6 @@
       });
     }
 
-    // 複数キーの自動切り替え付きAPIリクエスト関数
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyを入力・保存してください。');
@@ -327,7 +348,7 @@
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
         try {
           const response = await fetch(apiUrl, {
@@ -339,18 +360,17 @@
           const resData = await response.json();
 
           if (!resData.error) {
-            return resData; // 成功した場合は即座に返却
+            return resData;
           }
 
-          // 回数制限(429/Quota)やエラーが発生した場合は次のキーへ切り替え
-          console.warn(`Key ${i+1} エラー: ${resData.error.message}. 次のキーを試します...`);
+          console.warn(`API Key ${i+1} エラー: ${resData.error.message}. 次のキーで再試行します...`);
           lastError = resData.error;
         } catch (err) {
           lastError = err;
         }
       }
 
-      throw new Error(`全キー利用不可/エラー: ${lastError ? lastError.message : '制限上限です'}`);
+      throw new Error(`全キー利用不可: ${lastError ? lastError.message : '制限上限です'}`);
     }
 
     async function analyzeImages() {
@@ -359,7 +379,7 @@
 
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
-      status.innerText = `${fileInput.files.length}枚の画像を自動キー選択で解析中...`;
+      status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
 
       try {
         const parts = [];
@@ -403,7 +423,6 @@ JSONフォーマット:
           });
         }
 
-        // 自動ローテーションAPI呼び出し
         const resData = await fetchWithKeyRotation(parts);
 
         const rawText = resData.candidates[0].content.parts[0].text;
