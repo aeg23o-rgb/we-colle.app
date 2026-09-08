@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v3.0</title>
+  <title>ウイコレ手持ち管理ツール v3.1</title>
   <style>
     body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
     .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-    .version-info { font-size: 0.85em; color: #28a745; font-weight: bold; margin-bottom: 10px; }
+    .version-info { font-size: 0.85em; color: #dc3545; font-weight: bold; margin-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; }
     th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
     th { background-color: #007bff; color: white; }
@@ -16,7 +16,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v3.0 (モデル自動動的取得・最終改修版)</div>
+  <div class="version-info">バージョン: v3.1 (gemini-3.6-flash 直接呼出版)</div>
 
   <div class="card">
     <label>Gemini API Key: </label>
@@ -53,7 +53,7 @@
       </tr>
     </thead>
     <tbody id="cardTable">
-      <!-- ここに解析結果が追加されます -->
+      <!-- 解析結果追加位置 -->
     </tbody>
   </table>
 
@@ -86,32 +86,6 @@
       });
     }
 
-    // 利用可能なモデル一覧を動的に取得する処理
-    async function getAvailableModel(apiKey) {
-      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-      const res = await fetch(listUrl);
-      const data = await res.json();
-
-      if (data.error) {
-        throw new Error(`APIキー検証エラー: ${data.error.message}`);
-      }
-
-      if (!data.models || data.models.length === 0) {
-        throw new Error('利用可能なモデルが見つかりませんでした。APIキーを確認してください。');
-      }
-
-      // generateContentに対応しており、かつflash系のモデルを優先検索
-      const supportedModels = data.models.filter(m => 
-        m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-      );
-
-      // flashモデルを優先、なければ対応モデルの先頭を使用
-      const flashModel = supportedModels.find(m => m.name.includes('flash'));
-      const selectedModel = flashModel ? flashModel.name : supportedModels[0].name;
-
-      return selectedModel; // 例: "models/gemini-3.7-flash"
-    }
-
     async function analyzeImages() {
       const apiKey = document.getElementById('apiKey').value.trim();
       const fileInput = document.getElementById('imageInput');
@@ -120,17 +94,13 @@
       if (!apiKey) return alert('API Keyを入力してください');
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
-      status.innerText = '利用可能なモデルを確認中...';
+      status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
 
       try {
-        // 利用可能なモデルを動的取得
-        const modelName = await getAvailableModel(apiKey);
-        status.innerText = `使用モデル: ${modelName.replace('models/', '')} で解析中...`;
-
         const parts = [];
         let previewDataUrl = '';
 
-        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下の項目を統合して1つのJSONオブジェクトのみを出力してください。余計な文字列や解説は一切含めず、純粋なJSONのみを返してください。
+        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、以下のJSONフォーマットのみを出力してください。余計な文章は一切含めないでください。
 
 JSONフォーマット:
 {
@@ -166,8 +136,8 @@ JSONフォーマット:
           });
         }
 
-        // 動的取得したモデル名でAPI実行
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
+        // 指定どおり gemini-3.6-flash を正しくリクエスト
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -183,7 +153,7 @@ JSONフォーマット:
         const rawText = resData.candidates[0].content.parts[0].text;
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          throw new Error('AIからの応答をJSONとして解析できませんでした。');
+          throw new Error('解析結果の取得に失敗しました。');
         }
 
         const card = JSON.parse(jsonMatch[0]);
