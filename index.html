@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v6.0</title>
+  <title>ウイコレ手持ち管理ツール v7.0</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -24,23 +24,25 @@
     th, td { border: 1px solid #ddd; padding: 5px 6px; text-align: center; vertical-align: middle; }
     th { background-color: #007bff; color: white; position: sticky; top: 0; }
     th.sub-header { background-color: #0056b3; font-size: 0.9em; }
+    th.calc-header { background-color: #28a745; font-size: 0.9em; }
     
     .img-container { width: 60px; height: 80px; overflow: hidden; margin: 0 auto; border-radius: 4px; border: 1px solid #ccc; }
     .card-thumb { width: 140%; height: 140%; object-fit: cover; object-position: 50% 15%; margin-left: -20%; margin-top: -10%; }
     
     td[contenteditable="true"] { background-color: #fffde7; outline: 1px dashed #ffc107; }
+    .calc-val { background-color: #e8f5e9; font-weight: bold; color: #2e7d32; }
   </style>
 </head>
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v6.0 (保存/復元・編集/削除・絞り込み・CSV/JSON出力対応)</div>
+  <div class="version-info">バージョン: v7.0 (複数APIキー自動切り替え・Lv.MAX/キラ化ステータス自動計算対応)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
-    <label>Gemini API Key: </label>
-    <input type="password" id="apiKey" placeholder="AI Studioで取得したキーを入力">
-    <button class="btn" onclick="saveApiKey()">キーを保存</button>
+    <label>Gemini API Keys (カンマ区切りで複数入力可能): </label><br>
+    <input type="password" id="apiKey" style="width: 60%;" placeholder="Key1, Key2, Key3 のように複数登録可能">
+    <button class="btn" onclick="saveApiKey()">キー群を保存</button>
     <span id="keyStatus" style="color: green; font-size: 0.9em; margin-left: 10px;"></span>
     <br><br>
     <input type="file" id="imageInput" accept="image/*" multiple>
@@ -70,7 +72,7 @@
       <select id="sortBy" onchange="renderTable()">
         <option value="default">登録順</option>
         <option value="gradeDesc">グレード順 (高い順)</option>
-        <option value="gradeAsc">グレード順 (低い順)</option>
+        <option value="maxStatDesc">Lv.MAX総合値順</option>
       </select>
     </div>
 
@@ -99,18 +101,24 @@
           <th rowspan="2">ポジション適性</th>
           <th rowspan="2">キラ</th>
           <th rowspan="2">SHOWTIME</th>
-          <th rowspan="2">OF</th>
-          <th rowspan="2">DF</th>
-          <th rowspan="2">TC</th>
-          <th rowspan="2">PO</th>
-          <th rowspan="2">SP</th>
-          <th rowspan="2">ST</th>
+          <th colspan="6">現在ステータス</th>
+          <th colspan="2">予測ステータス</th>
           <th colspan="3">メインスキル</th>
           <th colspan="3">セレクトスキル</th>
           <th colspan="3">センス</th>
           <th colspan="7">ボーナスセンス (最大7枠)</th>
         </tr>
         <tr>
+          <th class="sub-header">OF</th>
+          <th class="sub-header">DF</th>
+          <th class="sub-header">TC</th>
+          <th class="sub-header">PO</th>
+          <th class="sub-header">SP</th>
+          <th class="sub-header">ST</th>
+          <!-- 予測ステータス -->
+          <th class="calc-header">Lv.MAX総合値</th>
+          <th class="calc-header">キラ化時総合値(+10%)</th>
+          <!-- スキル詳細 -->
           <th class="sub-header">メイン1</th>
           <th class="sub-header">メイン2</th>
           <th class="sub-header">メイン3</th>
@@ -137,7 +145,7 @@
     let cardList = [];
 
     window.onload = function() {
-      const savedKey = localStorage.getItem('gemini_api_key');
+      const savedKey = localStorage.getItem('gemini_api_keys');
       if (savedKey) {
         document.getElementById('apiKey').value = savedKey;
         document.getElementById('keyStatus').innerText = '※保存済み';
@@ -148,12 +156,18 @@
     function saveApiKey() {
       const key = document.getElementById('apiKey').value;
       if (key) {
-        localStorage.setItem('gemini_api_key', key);
+        localStorage.setItem('gemini_api_keys', key);
         document.getElementById('keyStatus').innerText = '※保存しました！';
       } else {
-        localStorage.removeItem('gemini_api_key');
+        localStorage.removeItem('gemini_api_keys');
         document.getElementById('keyStatus').innerText = '';
       }
+    }
+
+    function getApiKeys() {
+      const raw = document.getElementById('apiKey').value.trim();
+      if (!raw) return [];
+      return raw.split(',').map(k => k.trim()).filter(k => k.length > 0);
     }
 
     function saveCards() {
@@ -169,6 +183,29 @@
       renderTable();
     }
 
+    // Lv.MAX総合値 & キラ化総合値の自動判定・補正計算
+    function calcPredictedStats(card) {
+      const of = parseInt(card.offence) || 0;
+      const df = parseInt(card.defence) || 0;
+      const tc = parseInt(card.technique) || 0;
+      const po = parseInt(card.power) || 0;
+      const sp = parseInt(card.speed) || 0;
+      const st = parseInt(card.stamina) || 0;
+      
+      const currentTotal = of + df + tc + po + sp + st;
+      const grade = parseInt(card.grade) || 100;
+
+      // 概算Lv.MAX補正係数 (グレード依存)
+      const maxMult = 1.35 + (grade / 500); 
+      const maxTotal = Math.round(currentTotal * maxMult);
+
+      // キラ化 (+10% 補正)
+      const isKira = (card.is_kira && card.is_kira.includes('あり'));
+      const kiraTotal = isKira ? maxTotal : Math.round(maxTotal * 1.10);
+
+      return { maxTotal, kiraTotal };
+    }
+
     function renderTable() {
       const tbody = document.getElementById('cardTable');
       tbody.innerHTML = '';
@@ -178,7 +215,6 @@
       const filterSelectOnly = document.getElementById('filterSelectOnly').checked;
       const sortBy = document.getElementById('sortBy').value;
 
-      // フィルタリング
       let filtered = cardList.filter(card => {
         const matchesName = !searchName || (card.name && card.name.toLowerCase().includes(searchName));
         const matchesType = !filterType || card.type === filterType;
@@ -186,20 +222,19 @@
         return matchesName && matchesType && hasSelect;
       });
 
-      // ソート
       if (sortBy === 'gradeDesc') {
         filtered.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
-      } else if (sortBy === 'gradeAsc') {
-        filtered.sort((a, b) => (parseInt(a.grade) || 0) - (parseInt(b.grade) || 0));
+      } else if (sortBy === 'maxStatDesc') {
+        filtered.sort((a, b) => calcPredictedStats(b).maxTotal - calcPredictedStats(a).maxTotal);
       }
 
       document.getElementById('cardCount').innerText = filtered.length;
-
       const getVal = (arr, idx) => (Array.isArray(arr) && arr[idx]) ? arr[idx] : '-';
 
       filtered.forEach((card) => {
         const originalIndex = cardList.indexOf(card);
         const row = tbody.insertRow();
+        const predicted = calcPredictedStats(card);
 
         row.innerHTML = `
           <td>
@@ -213,6 +248,7 @@
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'position', this.innerText)" style="text-align:left;">${card.position || '-'}</td>
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'is_kira', this.innerText)">${card.is_kira || '-'}</td>
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'showtime', this.innerText)">${card.showtime || '-'}</td>
+          
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'offence', this.innerText)">${card.offence || '-'}</td>
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'defence', this.innerText)">${card.defence || '-'}</td>
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'technique', this.innerText)">${card.technique || '-'}</td>
@@ -220,6 +256,9 @@
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'speed', this.innerText)">${card.speed || '-'}</td>
           <td contenteditable="true" onblur="updateCardData(${originalIndex}, 'stamina', this.innerText)">${card.stamina || '-'}</td>
           
+          <td class="calc-val">${predicted.maxTotal}</td>
+          <td class="calc-val">${predicted.kiraTotal}</td>
+
           <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 0, this.innerText)">${getVal(card.main_skills, 0)}</td>
           <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 1, this.innerText)">${getVal(card.main_skills, 1)}</td>
           <td contenteditable="true" onblur="updateCardArrData(${originalIndex}, 'main_skills', 2, this.innerText)">${getVal(card.main_skills, 2)}</td>
@@ -246,12 +285,14 @@
     function updateCardData(index, field, val) {
       cardList[index][field] = val.trim();
       localStorage.setItem('wi_cards_data', JSON.stringify(cardList));
+      renderTable();
     }
 
     function updateCardArrData(index, field, arrIdx, val) {
       if (!Array.isArray(cardList[index][field])) cardList[index][field] = [];
       cardList[index][field][arrIdx] = val.trim();
       localStorage.setItem('wi_cards_data', JSON.stringify(cardList));
+      renderTable();
     }
 
     function deleteCard(index) {
@@ -277,15 +318,48 @@
       });
     }
 
+    // 複数キーの自動切り替え付きAPIリクエスト関数
+    async function fetchWithKeyRotation(parts) {
+      const keys = getApiKeys();
+      if (keys.length === 0) throw new Error('API Keyを入力・保存してください。');
+
+      let lastError = null;
+
+      for (let i = 0; i < keys.length; i++) {
+        const apiKey = keys[i];
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+        
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: parts }] })
+          });
+
+          const resData = await response.json();
+
+          if (!resData.error) {
+            return resData; // 成功した場合は即座に返却
+          }
+
+          // 回数制限(429/Quota)やエラーが発生した場合は次のキーへ切り替え
+          console.warn(`Key ${i+1} エラー: ${resData.error.message}. 次のキーを試します...`);
+          lastError = resData.error;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      throw new Error(`全キー利用不可/エラー: ${lastError ? lastError.message : '制限上限です'}`);
+    }
+
     async function analyzeImages() {
-      const apiKey = document.getElementById('apiKey').value.trim();
       const fileInput = document.getElementById('imageInput');
       const status = document.getElementById('status');
 
-      if (!apiKey) return alert('API Keyを入力してください');
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
-      status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
+      status.innerText = `${fileInput.files.length}枚の画像を自動キー選択で解析中...`;
 
       try {
         const parts = [];
@@ -329,18 +403,8 @@ JSONフォーマット:
           });
         }
 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: parts }] })
-        });
-
-        const resData = await response.json();
-
-        if (resData.error) {
-          throw new Error(`APIエラー (${resData.error.code}): ${resData.error.message}`);
-        }
+        // 自動ローテーションAPI呼び出し
+        const resData = await fetchWithKeyRotation(parts);
 
         const rawText = resData.candidates[0].content.parts[0].text;
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
@@ -349,7 +413,7 @@ JSONフォーマット:
         }
 
         const card = JSON.parse(jsonMatch[0]);
-        card.image = previewDataUrl; // 画像データ保持
+        card.image = previewDataUrl;
 
         cardList.push(card);
         saveCards();
@@ -362,17 +426,14 @@ JSONフォーマット:
       }
     }
 
-    // CSVエクスポート
     function exportCSV() {
       if (cardList.length === 0) return alert('データがありません');
-
-      let csv = '\uFEFF'; // UTF-8 BOM（Excel文字化け防止）
-      csv += '選手名,カード種類,グレード,タイプ,ポジション適性,キラ,SHOWTIME,OF,DF,TC,PO,SP,ST,メイン1,メイン2,メイン3,セレクト1,セレクト2,セレクト3,センス1,センス2,センス3,Lv1-1,Lv1-2,Lv2-1,Lv2-2,Lv3-1,Lv3-2,Lv3-3\n';
-
+      let csv = '\uFEFF選手名,カード種類,グレード,タイプ,ポジション適性,キラ,SHOWTIME,OF,DF,TC,PO,SP,ST,Lv.MAX総合値,キラ化時総合値,メイン1,メイン2,メイン3,セレクト1,セレクト2,セレクト3,センス1,センス2,センス3,Lv1-1,Lv1-2,Lv2-1,Lv2-2,Lv3-1,Lv3-2,Lv3-3\n';
       const getV = (arr, i) => (Array.isArray(arr) && arr[i]) ? `"${arr[i]}"` : '""';
 
       cardList.forEach(c => {
-        csv += `"${c.name||''}","${c.card_type||''}","${c.grade||''}","${c.type||''}","${c.position||''}","${c.is_kira||''}","${c.showtime||''}","${c.offence||''}","${c.defence||''}","${c.technique||''}","${c.power||''}","${c.speed||''}","${c.stamina||''}",`
+        const p = calcPredictedStats(c);
+        csv += `"${c.name||''}","${c.card_type||''}","${c.grade||''}","${c.type||''}","${c.position||''}","${c.is_kira||''}","${c.showtime||''}","${c.offence||''}","${c.defence||''}","${c.technique||''}","${c.power||''}","${c.speed||''}","${c.stamina||''}",${p.maxTotal},${p.kiraTotal},`
             + `${getV(c.main_skills,0)},${getV(c.main_skills,1)},${getV(c.main_skills,2)},`
             + `${getV(c.select_skills,0)},${getV(c.select_skills,1)},${getV(c.select_skills,2)},`
             + `${getV(c.senses,0)},${getV(c.senses,1)},${getV(c.senses,2)},`
@@ -386,7 +447,6 @@ JSONフォーマット:
       link.click();
     }
 
-    // JSONエクスポート
     function exportJSON() {
       if (cardList.length === 0) return alert('データがありません');
       const blob = new Blob([JSON.stringify(cardList, null, 2)], { type: 'application/json' });
@@ -396,7 +456,6 @@ JSONフォーマット:
       link.click();
     }
 
-    // JSONインポート
     function importJSON(e) {
       const file = e.target.files[0];
       if (!file) return;
