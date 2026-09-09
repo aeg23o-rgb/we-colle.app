@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v7.4</title>
+  <title>ウイコレ手持ち管理ツール v7.5</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -41,7 +41,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v7.4 (Google API v1 / gemini-1.5-flash 完全適合版)</div>
+  <div class="version-info">バージョン: v7.5 (Gemini API 修正・通信最適化版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -348,8 +348,8 @@
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
-        // 正式なGoogle API v1 エンドポイント (gemini-1.5-flash)
-        const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        // v1betaエンドポイントかつ標準モデル名を使用
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
         try {
           const response = await fetch(apiUrl, {
@@ -365,14 +365,14 @@
           }
 
           lastErrorMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
-          console.warn(`API Key [${i+1}] エラー: ${lastErrorMsg}。次のキーを試します...`);
+          console.warn(`API Key [${i+1}] エラー: ${lastErrorMsg}`);
         } catch (err) {
           lastErrorMsg = err.message;
           console.warn(`API Key [${i+1}] 通信失敗: ${err.message}`);
         }
       }
 
-      throw new Error(`全キー利用不可 (${lastErrorMsg})。キーが無効か、無料枠の制限に達している可能性があります。`);
+      throw new Error(`全キー利用不可 (${lastErrorMsg})`);
     }
 
     async function analyzeImages() {
