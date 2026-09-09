@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v7.3</title>
+  <title>ウイコレ手持ち管理ツール v7.4</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -41,7 +41,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v7.3 (モデルAPI指定修正・複数キー対応)</div>
+  <div class="version-info">バージョン: v7.4 (Google API v1 / gemini-1.5-flash 完全適合版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -342,40 +342,37 @@
 
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
-      if (keys.length === 0) throw new Error('API Keyを入力・保存してください。');
+      if (keys.length === 0) throw new Error('API Keyが登録されていません。API 1〜5のいずれかにキーを入力して保存してください。');
 
-      // 互換性の高い標準モデルを優先使用
-      const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
-      let lastError = null;
+      let lastErrorMsg = '';
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
+        // 正式なGoogle API v1 エンドポイント (gemini-1.5-flash)
+        const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        for (const model of models) {
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-          
-          try {
-            const response = await fetch(apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: parts }] })
-            });
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: parts }] })
+          });
 
-            const resData = await response.json();
+          const resData = await response.json();
 
-            if (!resData.error) {
-              return resData;
-            }
-
-            lastError = resData.error;
-            console.warn(`Key ${i+1} (${model}) エラー: ${resData.error.message}`);
-          } catch (err) {
-            lastError = err;
+          if (response.ok && !resData.error) {
+            return resData;
           }
+
+          lastErrorMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
+          console.warn(`API Key [${i+1}] エラー: ${lastErrorMsg}。次のキーを試します...`);
+        } catch (err) {
+          lastErrorMsg = err.message;
+          console.warn(`API Key [${i+1}] 通信失敗: ${err.message}`);
         }
       }
 
-      throw new Error(`全キー利用不可: ${lastError ? lastError.message : '通信エラーが発生しました'}`);
+      throw new Error(`全キー利用不可 (${lastErrorMsg})。キーが無効か、無料枠の制限に達している可能性があります。`);
     }
 
     async function analyzeImages() {
@@ -384,13 +381,14 @@
 
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
+      status.style.color = 'black';
       status.innerText = `${fileInput.files.length}枚の画像を解析中...`;
 
       try {
         const parts = [];
         let previewDataUrl = '';
 
-        const promptText = `提供されたウイコレのスクリーンショット画像（最大3枚）から情報を読み取り、指定のJSON形式で出力してください。
+        const promptText = `提供されたウイコレのスクリーンショット画像から情報を読み取り、指定のJSON形式のみで出力してください。余計な解説文は一切不要です。
 
 JSONフォーマット:
 {
@@ -398,7 +396,7 @@ JSONフォーマット:
   "card_type": "カード種別",
   "grade": "グレード数値",
   "type": "タイプ",
-  "position": "本適性: OMF, CMF / 薄適性: DMF",
+  "position": "ポジション適性",
   "is_kira": "あり/なし",
   "showtime": "あり/なし",
   "offence": "OF数値",
@@ -433,7 +431,7 @@ JSONフォーマット:
         const rawText = resData.candidates[0].content.parts[0].text;
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          throw new Error('解析結果の取得に失敗しました。');
+          throw new Error('解析データの抽出に失敗しました。もう一度試してください。');
         }
 
         const card = JSON.parse(jsonMatch[0]);
@@ -442,10 +440,12 @@ JSONフォーマット:
         cardList.push(card);
         saveCards();
 
+        status.style.color = 'green';
         status.innerText = '解析＆追加完了！';
         fileInput.value = '';
       } catch (e) {
         console.error(e);
+        status.style.color = 'red';
         status.innerText = 'エラー詳細: ' + e.message;
       }
     }
