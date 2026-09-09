@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v7.2</title>
+  <title>ウイコレ手持ち管理ツール v7.3</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -41,7 +41,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v7.2 (APIキー5枠分割・自動ローテーション対応)</div>
+  <div class="version-info">バージョン: v7.3 (モデルAPI指定修正・複数キー対応)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -344,33 +344,38 @@
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyを入力・保存してください。');
 
+      // 互換性の高い標準モデルを優先使用
+      const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
       let lastError = null;
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        
-        try {
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: parts }] })
-          });
 
-          const resData = await response.json();
+        for (const model of models) {
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          
+          try {
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: parts }] })
+            });
 
-          if (!resData.error) {
-            return resData;
+            const resData = await response.json();
+
+            if (!resData.error) {
+              return resData;
+            }
+
+            lastError = resData.error;
+            console.warn(`Key ${i+1} (${model}) エラー: ${resData.error.message}`);
+          } catch (err) {
+            lastError = err;
           }
-
-          console.warn(`API Key ${i+1} エラー: ${resData.error.message}. 次のキーで再試行します...`);
-          lastError = resData.error;
-        } catch (err) {
-          lastError = err;
         }
       }
 
-      throw new Error(`全キー利用不可: ${lastError ? lastError.message : '制限上限です'}`);
+      throw new Error(`全キー利用不可: ${lastError ? lastError.message : '通信エラーが発生しました'}`);
     }
 
     async function analyzeImages() {
