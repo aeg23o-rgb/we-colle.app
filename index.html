@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ちカード自動登録ツール v9.0</title>
+  <title>ウイコレ手持ちカード自動登録ツール v9.1</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -36,12 +36,13 @@
     
     td[contenteditable="true"] { background-color: #fffde7; outline: 1px dashed #ffc107; }
     .calc-val { background-color: #e8f5e9; font-weight: bold; color: #2e7d32; }
+    .error-box { background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; margin-top: 8px; display: none; }
   </style>
 </head>
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v9.0 (リアルタイム利用可能モデル自動動的取得版)</div>
+  <div class="version-info">バージョン: v9.1 (Quota最適化＆日本語エラー表示対応版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -59,6 +60,7 @@
     <input type="file" id="imageInput" accept="image/*" multiple>
     <button class="btn btn-success" onclick="analyzeImages()">スクショを解析して追加</button>
     <span id="status" style="margin-left: 10px; font-weight: bold;"></span>
+    <div id="errorBox" class="error-box"></div>
   </div>
 
   <!-- 絞り込み & データ管理コントロール -->
@@ -341,86 +343,71 @@
       });
     }
 
-    // APIキーごとに今「実際に使用可能なモデル一覧」をリアルタイムで直接Googleから取得する関数
-    async function getAvailableModelsForKey(apiKey) {
-      const endpoints = [
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-        `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
-      ];
-
-      for (const url of endpoints) {
-        try {
-          const res = await fetch(url);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.models && Array.isArray(data.models)) {
-              // generateContentに対応しているモデルのみ抽出
-              const usableModels = data.models
-                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-                .map(m => m.name.replace(/^models\//, ''));
-              if (usableModels.length > 0) return usableModels;
-            }
-          }
-        } catch (e) {
-          console.warn('モデル取得失敗:', e);
-        }
+    // 英語エラーメッセージを日本語解説付きに変換する関数
+    function translateErrorMessage(msg) {
+      if (msg.includes('quota') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+        return `【利用制限オーバー (Quota Exceeded)】\nGemini APIの無料利用枠（1分間の回数上限または1日の上限）を超過しました。\n💡対処法: 1〜2分ほど時間をおいて再試行するか、API 2やAPI 3に別の新しいキーを追加登録してください。`;
       }
-      return [];
+      if (msg.includes('not found') || msg.includes('404')) {
+        return `【モデル・エンドポイント未検出】\n指定されたAIモデルまたはAPIバージョンが利用できません。`;
+      }
+      if (msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
+        return `【APIキー無効】\n設定されているGemini APIキーが無効か間違っています。キーを確認してください。`;
+      }
+      return `【通信エラー】\n${msg}`;
     }
 
-    // ★完全解決: モデル名の動的取得＆リアルタイム自動切り替え通信ロジック
+    // クォータ節約＆マルチキー順次通信ロジック
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
-      let lastErrors = [];
+      // 通信安定性の高い標準モデル候補
+      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
+      let lastErrorMsg = '';
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
-        
-        // ① このキーで実際に利用可能なモデル一覧を動的に取得
-        const availableModels = await getAvailableModelsForKey(apiKey);
-        
-        // 万が一動的取得に失敗した場合は予備リスト（flash優先）を使用
-        const targetModels = availableModels.length > 0 
-          ? availableModels.filter(m => m.includes('flash')).concat(availableModels.filter(m => !m.includes('flash')))
-          : ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
 
-        for (const modelName of targetModels) {
-          const apiVersions = ['v1beta', 'v1'];
-          for (const ver of apiVersions) {
-            const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${apiKey}`;
+        for (const modelName of candidateModels) {
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-            try {
-              const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: parts }] })
-              });
+          try {
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: parts }] })
+            });
 
-              const resData = await response.json();
+            const resData = await response.json();
 
-              if (response.ok && !resData.error) {
-                console.log(`成功通信: Key[${i+1}], Ver[${ver}], Model[${modelName}]`);
-                return resData;
-              }
-
-              const errMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
-              lastErrors.push(`Key${i+1}/${modelName}: ${errMsg}`);
-            } catch (err) {
-              lastErrors.push(`Key${i+1}/${modelName}: ${err.message}`);
+            if (response.ok && !resData.error) {
+              return resData;
             }
+
+            if (resData.error) {
+              lastErrorMsg = resData.error.message || `HTTP ${response.status}`;
+              // クォータ切れ（429）の場合は次のキーへすぐ切り替え
+              if (response.status === 429 || lastErrorMsg.includes('quota')) {
+                break;
+              }
+            }
+          } catch (err) {
+            lastErrorMsg = err.message;
           }
         }
       }
 
-      const latestErr = lastErrors.length > 0 ? lastErrors[lastErrors.length - 1] : '通信失敗';
-      throw new Error(`全試行失敗 - ${latestErr}`);
+      throw new Error(lastErrorMsg || '通信に失敗しました。');
     }
 
     async function analyzeImages() {
       const fileInput = document.getElementById('imageInput');
       const status = document.getElementById('status');
+      const errorBox = document.getElementById('errorBox');
+
+      errorBox.style.display = 'none';
+      errorBox.innerText = '';
 
       if (fileInput.files.length === 0) return alert('画像を選択してください');
 
@@ -493,7 +480,11 @@ JSONフォーマット:
       } catch (e) {
         console.error(e);
         status.style.color = 'red';
-        status.innerText = 'エラー詳細: ' + e.message;
+        status.innerText = '解析失敗';
+        
+        const translatedMsg = translateErrorMessage(e.message);
+        errorBox.innerText = `エラー詳細: ${e.message}\n\n【和訳・対策】\n${translatedMsg}`;
+        errorBox.style.display = 'block';
       }
     }
 
