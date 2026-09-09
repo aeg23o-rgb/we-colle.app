@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ちカード自動登録ツール v8.0</title>
+  <title>ウイコレ手持ちカード自動登録ツール v9.0</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -41,7 +41,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v8.0 (モデル自動フォールバック＆エンドポイント完全検証版)</div>
+  <div class="version-info">バージョン: v9.0 (リアルタイム利用可能モデル自動動的取得版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -341,26 +341,53 @@
       });
     }
 
-    // ★完全修正: 多重自動フォールバック通信ロジック
+    // APIキーごとに今「実際に使用可能なモデル一覧」をリアルタイムで直接Googleから取得する関数
+    async function getAvailableModelsForKey(apiKey) {
+      const endpoints = [
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
+      ];
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.models && Array.isArray(data.models)) {
+              // generateContentに対応しているモデルのみ抽出
+              const usableModels = data.models
+                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+                .map(m => m.name.replace(/^models\//, ''));
+              if (usableModels.length > 0) return usableModels;
+            }
+          }
+        } catch (e) {
+          console.warn('モデル取得失敗:', e);
+        }
+      }
+      return [];
+    }
+
+    // ★完全解決: モデル名の動的取得＆リアルタイム自動切り替え通信ロジック
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
-      // 無料・有料関係なく試行する優先モデル順序
-      const modelsToTry = [
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash'
-      ];
-
-      const apiVersions = ['v1beta', 'v1'];
       let lastErrors = [];
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
+        
+        // ① このキーで実際に利用可能なモデル一覧を動的に取得
+        const availableModels = await getAvailableModelsForKey(apiKey);
+        
+        // 万が一動的取得に失敗した場合は予備リスト（flash優先）を使用
+        const targetModels = availableModels.length > 0 
+          ? availableModels.filter(m => m.includes('flash')).concat(availableModels.filter(m => !m.includes('flash')))
+          : ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
 
-        for (const modelName of modelsToTry) {
+        for (const modelName of targetModels) {
+          const apiVersions = ['v1beta', 'v1'];
           for (const ver of apiVersions) {
             const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -374,21 +401,20 @@
               const resData = await response.json();
 
               if (response.ok && !resData.error) {
-                console.log(`成功通信: API Key[${i+1}], Version[${ver}], Model[${modelName}]`);
+                console.log(`成功通信: Key[${i+1}], Ver[${ver}], Model[${modelName}]`);
                 return resData;
               }
 
               const errMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
-              lastErrors.push(`Key${i+1}/${modelName}/${ver}: ${errMsg}`);
+              lastErrors.push(`Key${i+1}/${modelName}: ${errMsg}`);
             } catch (err) {
-              lastErrors.push(`Key${i+1}/${modelName}/${ver}: ${err.message}`);
+              lastErrors.push(`Key${i+1}/${modelName}: ${err.message}`);
             }
           }
         }
       }
 
-      // 全パターン失敗時の最直近エラー文を出力
-      const latestErr = lastErrors.length > 0 ? lastErrors[lastErrors.length - 1] : '不明な通信エラー';
+      const latestErr = lastErrors.length > 0 ? lastErrors[lastErrors.length - 1] : '通信失敗';
       throw new Error(`全試行失敗 - ${latestErr}`);
     }
 
@@ -405,7 +431,7 @@
         const parts = [];
         let previewDataUrl = '';
 
-        const promptText = `提供されたウイコレのスクリーンショット画像から情報を読み取り、指定のJSON形式のみで出力してください。Markdown装飾(コードブロック記号など)を含めず、生データのみを出力してください。
+        const promptText = `提供されたウイコレのスクリーンショット画像から情報を読み取り、指定のJSON形式のみで出力してください。Markdown表記は不要です。
 
 JSONフォーマット:
 {
@@ -446,13 +472,13 @@ JSONフォーマット:
         const resData = await fetchWithKeyRotation(parts);
 
         if (!resData.candidates || !resData.candidates[0] || !resData.candidates[0].content) {
-          throw new Error('APIからの返答フォーマットが不正です。');
+          throw new Error('APIからの応答構造が不正です。');
         }
 
         const rawText = resData.candidates[0].content.parts[0].text;
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          throw new Error('解析データの抽出に失敗しました。もう一度試してください。');
+          throw new Error('解析データの抽出に失敗しました。');
         }
 
         const card = JSON.parse(jsonMatch[0]);
