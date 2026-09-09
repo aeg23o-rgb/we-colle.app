@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ちカード自動登録ツール v9.1</title>
+  <title>ウイコレ手持ちカード自動登録ツール v9.3</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -36,13 +36,13 @@
     
     td[contenteditable="true"] { background-color: #fffde7; outline: 1px dashed #ffc107; }
     .calc-val { background-color: #e8f5e9; font-weight: bold; color: #2e7d32; }
-    .error-box { background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; margin-top: 8px; display: none; }
+    .error-box { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-top: 8px; display: none; line-height: 1.4; }
   </style>
 </head>
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v9.1 (Quota最適化＆日本語エラー表示対応版)</div>
+  <div class="version-info">バージョン: v9.3 (最終動作確認済み・モデル自動フォールバック版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -343,33 +343,30 @@
       });
     }
 
-    // 英語エラーメッセージを日本語解説付きに変換する関数
     function translateErrorMessage(msg) {
       if (msg.includes('quota') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED')) {
-        return `【利用制限オーバー (Quota Exceeded)】\nGemini APIの無料利用枠（1分間の回数上限または1日の上限）を超過しました。\n💡対処法: 1〜2分ほど時間をおいて再試行するか、API 2やAPI 3に別の新しいキーを追加登録してください。`;
-      }
-      if (msg.includes('not found') || msg.includes('404')) {
-        return `【モデル・エンドポイント未検出】\n指定されたAIモデルまたはAPIバージョンが利用できません。`;
+        return `【利用制限オーバー (Quota Exceeded)】\n1分間あたりのGemini API利用制限に達しました。\n💡1分間休ませてから再試行するか、新しいAPIキーをAPI 2〜5に追加してください。`;
       }
       if (msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
-        return `【APIキー無効】\n設定されているGemini APIキーが無効か間違っています。キーを確認してください。`;
+        return `【APIキー設定エラー】\nAPIキーが不正です。不要なスペースが入っていないか、コピーし直してください。`;
       }
-      return `【通信エラー】\n${msg}`;
+      return `【通信・モデルエラー】\n${msg}`;
     }
 
-    // クォータ節約＆マルチキー順次通信ロジック
+    // ★最高レベルの堅牢性を備えた通信ロジック（Keyローテーション × モデルフォールバック）
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
-      // 通信安定性の高い標準モデル候補
-      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
+      // 使用するモデル候補（標準モデル -> 最新モデルの順で試行）
+      const candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash'];
       let lastErrorMsg = '';
 
-      for (let i = 0; i < keys.length; i++) {
-        const apiKey = keys[i];
+      for (let k = 0; k < keys.length; k++) {
+        const apiKey = keys[k];
 
-        for (const modelName of candidateModels) {
+        for (let m = 0; m < candidateModels.length; m++) {
+          const modelName = candidateModels[m];
           const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
           try {
@@ -382,15 +379,11 @@
             const resData = await response.json();
 
             if (response.ok && !resData.error) {
-              return resData;
+              return resData; // 成功！
             }
 
             if (resData.error) {
               lastErrorMsg = resData.error.message || `HTTP ${response.status}`;
-              // クォータ切れ（429）の場合は次のキーへすぐ切り替え
-              if (response.status === 429 || lastErrorMsg.includes('quota')) {
-                break;
-              }
             }
           } catch (err) {
             lastErrorMsg = err.message;
@@ -398,7 +391,7 @@
         }
       }
 
-      throw new Error(lastErrorMsg || '通信に失敗しました。');
+      throw new Error(lastErrorMsg || 'すべてのAPIキーおよびモデルでの通信に失敗しました。');
     }
 
     async function analyzeImages() {
