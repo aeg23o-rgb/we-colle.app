@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ち管理ツール v7.5</title>
+  <title>ウイコレ手持ち管理ツール v7.6</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -41,7 +41,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v7.5 (Gemini API 修正・通信最適化版)</div>
+  <div class="version-info">バージョン: v7.6 (APIエンドポイント・モデル名修正版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -342,33 +342,38 @@
 
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
-      if (keys.length === 0) throw new Error('API Keyが登録されていません。API 1〜5のいずれかにキーを入力して保存してください。');
+      if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
       let lastErrorMsg = '';
+      
+      // 無料枠で確実に動作するモデル名リスト
+      const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
       for (let i = 0; i < keys.length; i++) {
         const apiKey = keys[i];
-        // v1betaエンドポイントかつ標準モデル名を使用
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        try {
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: parts }] })
-          });
+        for (const modelName of modelsToTry) {
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-          const resData = await response.json();
+          try {
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: parts }] })
+            });
 
-          if (response.ok && !resData.error) {
-            return resData;
+            const resData = await response.json();
+
+            if (response.ok && !resData.error) {
+              return resData;
+            }
+
+            lastErrorMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
+            console.warn(`API Key [${i+1}] (${modelName}) エラー: ${lastErrorMsg}`);
+          } catch (err) {
+            lastErrorMsg = err.message;
+            console.warn(`API Key [${i+1}] 通信失敗: ${err.message}`);
           }
-
-          lastErrorMsg = resData.error ? resData.error.message : `HTTP ${response.status}`;
-          console.warn(`API Key [${i+1}] エラー: ${lastErrorMsg}`);
-        } catch (err) {
-          lastErrorMsg = err.message;
-          console.warn(`API Key [${i+1}] 通信失敗: ${err.message}`);
         }
       }
 
