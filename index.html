@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ちカード自動登録ツール v9.4</title>
+  <title>ウイコレ手持ちカード自動登録ツール v9.5</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -42,17 +42,17 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v9.4 (APIキー可視化＆自動空白除去版)</div>
+  <div class="version-info">バージョン: v9.5 (モデル修正・動作確定版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
-    <strong>🔑 Gemini API Key 設定 (最大5つまで登録可能・可視化対応):</strong>
+    <strong>🔑 Gemini API Key 設定 (最大5つまで登録可能):</strong>
     <div class="api-key-grid" style="margin-top: 8px;">
-      <div class="api-key-item"><label>API 1:</label><input type="text" id="apiKey1" placeholder="AIzaSy..."></div>
-      <div class="api-key-item"><label>API 2:</label><input type="text" id="apiKey2" placeholder="AIzaSy..."></div>
-      <div class="api-key-item"><label>API 3:</label><input type="text" id="apiKey3" placeholder="AIzaSy..."></div>
-      <div class="api-key-item"><label>API 4:</label><input type="text" id="apiKey4" placeholder="AIzaSy..."></div>
-      <div class="api-key-item"><label>API 5:</label><input type="text" id="apiKey5" placeholder="AIzaSy..."></div>
+      <div class="api-key-item"><label>API 1:</label><input type="text" id="apiKey1" placeholder="APIキー"></div>
+      <div class="api-key-item"><label>API 2:</label><input type="text" id="apiKey2" placeholder="APIキー"></div>
+      <div class="api-key-item"><label>API 3:</label><input type="text" id="apiKey3" placeholder="APIキー"></div>
+      <div class="api-key-item"><label>API 4:</label><input type="text" id="apiKey4" placeholder="APIキー"></div>
+      <div class="api-key-item"><label>API 5:</label><input type="text" id="apiKey5" placeholder="APIキー"></div>
     </div>
     <button class="btn" onclick="saveApiKey()">APIキー群を保存</button>
     <span id="keyStatus" style="color: green; font-size: 0.9em; margin-left: 10px;"></span>
@@ -169,7 +169,7 @@
     function saveApiKey() {
       for (let i = 1; i <= 5; i++) {
         const inputEl = document.getElementById(`apiKey${i}`);
-        const val = inputEl.value.trim(); // 余計な前後空白を削除
+        const val = inputEl.value.trim();
         inputEl.value = val;
         
         if (val) {
@@ -348,19 +348,18 @@
 
     function translateErrorMessage(msg) {
       if (msg.includes('quota') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED')) {
-        return `【利用制限オーバー (Quota Exceeded)】\n1分間あたりのGemini API利用制限に達しました。\n💡1分間休ませてから再試行するか、新しいAPIキーをAPI 2〜5に追加してください。`;
-      }
-      if (msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT') || msg.includes('invalid authentication')) {
-        return `【APIキー設定エラー】\nAPIキーが正しく認識されませんでした。キーの文字列が「AIzaSy...」から始まっているか確認してください。`;
+        return `【利用制限オーバー】\n1分間あたりのGemini API利用制限に達しました。1分ほどおいて再試行してください。`;
       }
       return `【通信・モデルエラー】\n${msg}`;
     }
 
+    // ★最新モデルへの自動フォールバック通信ロジック
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
-      const candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+      // 安定版および最新モデルの優先順位リスト
+      const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
       let lastErrorMsg = '';
 
       for (let k = 0; k < keys.length; k++) {
