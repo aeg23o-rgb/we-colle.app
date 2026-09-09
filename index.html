@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ウイコレ手持ちカード自動登録ツール v9.6</title>
+  <title>ウイコレ手持ちカード自動登録ツール v9.7</title>
   <style>
     body { font-family: sans-serif; padding: 15px; background: #f4f4f9; font-size: 0.85em; }
     .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -42,7 +42,7 @@
 <body>
 
   <h1>ウイコレ手持ちカード自動登録ツール</h1>
-  <div class="version-info">バージョン: v9.6 (AQキー完全対応版)</div>
+  <div class="version-info">バージョン: v9.7 (モデル指定修正版)</div>
 
   <!-- APIキー & 画像解析カード -->
   <div class="card">
@@ -346,13 +346,12 @@
       });
     }
 
-    // ★現行の全モデルに対応した通信関数
     async function fetchWithKeyRotation(parts) {
       const keys = getApiKeys();
       if (keys.length === 0) throw new Error('API Keyが登録されていません。');
 
-      // 順に試行するモデルリスト（現行仕様）
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash-exp'];
+      // 安定している標準モデル名に固定
+      const candidateModels = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
       let lastErrorMsg = '';
 
       for (let k = 0; k < keys.length; k++) {
@@ -384,7 +383,15 @@
         }
       }
 
-      throw new Error(lastErrorMsg || '通信に失敗しました。');
+      // エラー時の和訳処理
+      let translatedMsg = lastErrorMsg;
+      if (lastErrorMsg.includes('not found') || lastErrorMsg.includes('not supported')) {
+        translatedMsg = '指定されたモデルが見つからないか、お使いのAPIキーで許可されていません。';
+      } else if (lastErrorMsg.includes('API key not valid')) {
+        translatedMsg = 'APIキーが無効です。正しいキーを設定してください。';
+      }
+
+      throw new Error(translatedMsg);
     }
 
     async function analyzeImages() {
@@ -445,13 +452,13 @@ JSONフォーマット:
         const resData = await fetchWithKeyRotation(parts);
 
         if (!resData.candidates || !resData.candidates[0] || !resData.candidates[0].content) {
-          throw new Error('APIからの応答構造が不正です。');
+          throw new Error('APIからの応答データが空です。');
         }
 
         const rawText = resData.candidates[0].content.parts[0].text;
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          throw new Error('解析データの抽出に失敗しました。');
+          throw new Error('画像からのデータ抽出に失敗しました。');
         }
 
         const card = JSON.parse(jsonMatch[0]);
